@@ -1,0 +1,247 @@
+module comparator_4b(
+	output reg count_eq_10,
+	input [3:0]count
+	);
+
+	always @(*)
+		begin
+			if (count==4'b1010)
+				count_eq_10<=1;
+			else
+				begin
+					count_eq_10<=0;
+				end
+		end
+
+endmodule
+
+
+module counter_4bit(
+	output reg [3:0]count,
+	input clk,
+	input reset,
+	input cnt_clr
+	);
+
+always @(posedge clk or negedge reset)
+	begin
+		if (~reset)
+			count<=4'b0001;
+		else if (cnt_clr || count==4'b1010)
+			count<=4'b0001;
+		else
+		count=count+1;
+	end
+endmodule
+
+
+
+module mux2to1_6b ( 
+	output	[5:0]cashback,
+	input	[5:0]I0, I1,
+	input	st
+); 
+
+assign cashback = st ? I1 : I0;
+
+endmodule
+
+
+module mux2to1_2b ( 
+	output	[1:0]ticket,
+	input	[1:0]I0, I1,
+	input	stc
+); 
+
+assign ticket = stc ? I1 : I0;
+
+endmodule
+
+
+
+
+module ticket2price(
+
+	output	[5:0]price_out,
+	input	[1:0]ticket_sel
+);
+
+assign price_out = ticket_sel[1] ? (ticket_sel[0] ? 5'b001010 :5'b010100) : (ticket_sel[0] ? 5'b011110 : 5'b000000); 
+
+
+endmodule
+
+
+
+module tk_adder(
+
+output reg [5:0]total,
+input [5:0]TK10,
+input [5:0]TK20,
+input reset,
+input clk,
+input clr_tk
+);
+
+wire [5:0]w1=TK10 ? 6'b001010 : 6'b000000;
+wire [5:0]w2=TK20 ? 6'b010100 : 6'b000000;
+
+always @(posedge clk or negedge reset)
+begin
+if (~reset)
+	total <= 6'b000000;
+else if (clr_tk)
+	total <= 6'b000000;
+else
+	total <= (w1 + w2 + total);
+end
+endmodule
+
+
+
+module tk_comparator(
+	output reg comp_eq, comp_gt, comp_lt,
+	input [5:0]total, price_out
+	);
+
+	always @(*)
+		begin
+			if (total==price_out)
+				begin
+				comp_eq<=1;
+				comp_gt<=0;
+				 comp_lt<=0;
+				end
+			else if (total>price_out)
+				begin
+				comp_eq<=0;
+				comp_gt<=1;
+				 comp_lt<=0;
+				end
+			else
+				begin
+				comp_eq<=0;
+				comp_gt<=0;
+				 comp_lt<=1;
+				end
+		end
+
+endmodule
+
+
+
+module fsm(
+	output	clr_tk,
+	output	change,
+	output	pay,
+	output	stc,
+	output	st,
+	output	cnt_clr,
+	input 	clk,
+	input	reset,
+	input	start,
+	input	comp_eq,
+	input	comp_gt,
+	input	comp_lt,
+	input 	tc_avl_out,
+	input 	cnt_eq_10
+);
+
+reg[2:0]pstate, nstate;
+parameter [2:0]IDLE=3'b000;
+parameter [2:0]TICKET_SEL=3'b001;
+parameter [2:0]PAY_STATE=3'b010;
+parameter [2:0]DELEVER=3'b011;
+parameter [2:0]DELEVER_WITH_CHANGE=3'b100;
+parameter [2:0]PAY_BACK=3'b101;
+
+always @(*) begin:NSL //next state logic
+	case(pstate)
+		IDLE: 	begin
+			nstate=start ? TICKET_SEL : IDLE;
+			end
+		TICKET_SEL:
+			begin
+			nstate=cnt_eq_10 ? IDLE : PAY_STATE;
+			end
+		PAY_STATE:
+		 	begin
+			nstate=comp_eq ? ( tc_avl_out ? DELEVER : PAY_BACK) : (comp_gt ? (tc_avl_out ? DELEVER_WITH_CHANGE : PAY_BACK) : (cnt_eq_10 ? IDLE : PAY_STATE));
+			end
+		DELEVER:
+			begin
+			nstate=IDLE;		
+			end
+		DELEVER_WITH_CHANGE:
+			begin
+			nstate=IDLE;		
+			end
+		PAY_BACK:
+			begin
+			nstate=IDLE;		
+			end
+	endcase
+end
+//PSR present state register
+always @(posedge clk or negedge reset)
+	begin
+	if (~reset)
+		begin
+		pstate<=IDLE;
+		end
+	else
+		begin
+		pstate<=nstate;
+		end
+	end
+
+assign clr_tk 	= pstate == IDLE | pstate == DELEVER | pstate == DELEVER_WITH_CHANGE | pstate == PAY_BACK;
+assign change 	= pstate == DELEVER_WITH_CHANGE & comp_gt==1;
+assign pay	= pstate == PAY_STATE | (comp_eq==0 && comp_gt==0 && cnt_eq_10==0);
+assign stc	= pstate == (DELEVER && comp_eq==1) & tc_avl_out | pstate == (DELEVER_WITH_CHANGE && comp_gt==1) & tc_avl_out; // stc gettion on on idle
+assign st	= pstate == PAY_BACK | (comp_eq==1 && tc_avl_out==0) | (comp_eq==0 && comp_gt==0 && cnt_eq_10==1);
+assign cnt_clr 	= pstate == IDLE | (pstate == PAY_STATE && comp_eq==1) | (pstate == PAY_STATE && comp_gt==1);
+
+endmodule
+
+
+
+
+module top(
+	output [5:0]return,
+	output [1:0]ticket,
+	output change,
+	output pay,
+
+	input clk,
+	input reset,
+	input start,
+	input [1:0]tc_sel,
+	input [5:0]TK10,
+	input [5:0]TK20,
+	input [1:0]tc_avl
+
+);
+
+wire [5:0]total;
+wire clr_tk;
+wire comp_eq, comp_gt, comp_lt;
+wire [5:0]price_out;
+wire [3:0]count;
+wire cnt_clr;
+wire cnt_eq_10;
+wire stc;
+wire st;
+wire tc_avl_out;
+
+tk_adder U1_tk_adder		(total, TK10, TK20, reset, clk, clr_tk);
+tk_comparator U2_tk_comparator	(comp_eq, comp_gt, total, price_out);
+ticket2price U3_ticket2price	(price_out, tc_sel);
+counter_4bit U4_counter_4bit	(count, clk, reset, cnt_clr);
+comparator_4b U5_comparator_4b	(cnt_eq_10, count);
+mux2to1_2b U6_mux2to1_2b	(ticket, 2'b00, tc_sel, stc);
+mux2to1_6b U7_mux2to1_6b	(return, 6'b000000, total, st);
+or 				(tc_avl_out, tc_avl[0], tc_avl[1]);
+fsm fsm_U9			(clr_tk, change, pay, stc, st, cnt_clr, clk, reset, start, comp_eq, comp_gt, comp_lt, tc_avl_out, cnt_eq_10);
+
+endmodule
