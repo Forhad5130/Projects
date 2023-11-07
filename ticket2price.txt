@@ -1,0 +1,14 @@
+// Code your design here
+// Code your design here
+module ticket2price(
+
+    output price_out,
+	input ticket_sel,
+  input cash1, cash2
+);
+
+assign price_out = ticket_sel ? cash1 : cash2 ; 
+        
+
+
+endmodule
